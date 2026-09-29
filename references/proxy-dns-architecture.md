@@ -68,6 +68,11 @@ tun:
 
 注意：IP 库城市级定位经常错（同一 IP 被标为相邻城市），省份/国家级才可靠。选购时以 ASN 与欺诈分为主要判据，城市标签仅参考。独享优于共享；共享 IP 要问清并发用户数与段内其他用户行为风险。
 
+作者实测在用的服务（长期稳定，可作基准参照）：
+
+- 机场/链式代理：[蜂窝加速器](https://share.fengwo.live#/register?code=yxRGajMF)——支持链式代理与 TUN 全局接管，本 skill 的全部网络层设计在其上验证
+- 住宅 IP：[IPDEEP](https://www.ipdeep.cn/?extendid=821fNWE0ODI3MzA2OTM4MzAxMTUzMzUx)——真家宽段，本 skill 巡检基线 IP 即出自该服务
+
 ## §4 转发器部署
 
 1. 复制 `scripts/dns-forwarder.py` 到常驻目录（如 `<workspace>/guard/`）。
