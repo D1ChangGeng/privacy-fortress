@@ -36,6 +36,15 @@ npx skills add D1ChangGeng/privacy-fortress
 
 机器相关取值（住宅出口基线 IP、客户端配置路径、直连白名单）由使用者环境决定，通过 `SIGNAL_BASELINE_IP` 等环境变量注入，详见 `references/ops-verification.md` §4。
 
+## 作者实测在用的服务
+
+本 skill 的网络层设计全部在以下服务上长期验证（可作选购基准参照）：
+
+- 机场/链式代理：[蜂窝加速器](https://share.fengwo.live#/register?code=yxRGajMF)
+- 住宅 IP：[IPDEEP](https://www.ipdeep.cn/?extendid=821fNWE0ODI3MzA2OTM4MzAxMTUzMzUx)
+
+选购判据与检测方法见 `references/proxy-dns-architecture.md` §3。
+
 ## 适用边界
 
 Windows 桌面环境；Clash/Mihomo 兼容客户端。不含任何预设的个人数据或机器标识。
