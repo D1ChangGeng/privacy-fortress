@@ -54,6 +54,9 @@
 5. 历史中间文件按白名单清理：只留文档台账、在役脚本、每系列最新一份配置备份；清理明细留日志文件。
 6. 巡检报告与信号台账是持续运维载体——新增/关闭任何信号面的处置都记台账变更记录（版本号+日期+证据）。
 7. 卸载任何软件后，立即审计其计划任务/启动项/驱动残留（卸载程序普遍不自净）。排查法：`Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-TaskScheduler/Operational'; StartTime=<近2小时>}`，触发间隔异常（如每 2 分钟）的自家任务是重点怀疑对象。
+8. 注册表写入必须二次读取校验（写入与读回值一致才算完成）。曾发生"轮换 MachineGuid 以为成功、数日后核查仍为旧值"的案例——不校验的写入等于没做。
+9. 系统重装/恢复后，HKCU 下的隐私策略（如 Chrome WebRtcIPHandling、locale）全部归零，须在巡检中重验并补写；把"重装后首巡"当作一次全新部署对待。
+10. 新装目标应用后审计其配置目录（如 Electron 应用的 `%APPDATA%\<App>\config.json`）：登录态（无 userId / windowSizeWasSignedIn=false 即未绑定账号）、分析设备 ID（ant-did 类）、遥测计划任务（如 Cowork VM 组件首次使用才落地，落地即复扫）。账号绑定前的窗口是调整画像的唯一时机。
 
 ## §4 基线管理
 
