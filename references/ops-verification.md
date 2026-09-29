@@ -53,6 +53,7 @@
 4. 失联恢复顺序见 proxy-dns-architecture.md §6。
 5. 历史中间文件按白名单清理：只留文档台账、在役脚本、每系列最新一份配置备份；清理明细留日志文件。
 6. 巡检报告与信号台账是持续运维载体——新增/关闭任何信号面的处置都记台账变更记录（版本号+日期+证据）。
+7. 卸载任何软件后，立即审计其计划任务/启动项/驱动残留（卸载程序普遍不自净）。排查法：`Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-TaskScheduler/Operational'; StartTime=<近2小时>}`，触发间隔异常（如每 2 分钟）的自家任务是重点怀疑对象。
 
 ## §4 基线管理
 
