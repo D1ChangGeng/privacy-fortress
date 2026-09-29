@@ -57,6 +57,8 @@
 8. 注册表写入必须二次读取校验（写入与读回值一致才算完成）。曾发生"轮换 MachineGuid 以为成功、数日后核查仍为旧值"的案例——不校验的写入等于没做。
 9. 系统重装/恢复后，HKCU 下的隐私策略（如 Chrome WebRtcIPHandling、locale）全部归零，须在巡检中重验并补写；把"重装后首巡"当作一次全新部署对待。
 10. 新装目标应用后审计其配置目录（如 Electron 应用的 `%APPDATA%\<App>\config.json`）：登录态（无 userId / windowSizeWasSignedIn=false 即未绑定账号）、分析设备 ID（ant-did 类）、遥测计划任务（如 Cowork VM 组件首次使用才落地，落地即复扫）。账号绑定前的窗口是调整画像的唯一时机。
+11. 共享运行时白名单必须用 PROCESS-PATH（完整路径）而非 PROCESS-NAME：node.exe/python.exe 是所有 Node/Python 程序的共用进程名，按名字放行=把同机所有 CLI 工具（包括 AI CLI）放出隧道。Kimi Work 的 runtime node 用精确路径白名单，全局 node 落兜底 MATCH 即为正确隔离（2026-09-30 核查确认）。
+12. 区域格式（Culture/LocaleName，决定货币符号/日期格式）是 IP↔locale↔currency 一致性轴的一部分，必须与出口国对齐（如 ja-JP）；显示语言可独立保持母语，两者互不影响。
 
 ## §4 基线管理
 

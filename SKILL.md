@@ -75,6 +75,7 @@ git 提交时区/邮箱元数据清理（历史仓库按留三条保真、其余
 - `references/proxy-dns-architecture.md` — 分流规则设计、DNS 五层架构、转发器部署、链式注意点、事故恢复顺序
 - `references/browser-telemetry.md` — 浏览器指纹一致化、遥测阻断温和清单、helper 探测面防护
 - `references/ops-verification.md` — 18 项巡检清单、9 个检测站及通过标准、运维纪律
+- `references/threat-model-deep-matrix.md` — 以 AI 服务商政策文本为样本的全信号深矩阵（含 A/B/T/N 证据分级、CLI/Agent 环境面、一致性派生特征、处置优先级），Phase 0 审计与"是否还有遗漏"自检的最终对照表
 - `scripts/dns-forwarder.py` — 本地 DNS 转发器（127.0.0.1:53 → DoH，上游故障回 SERVFAIL 触发核心回落）
 - `scripts/daily-signal-scan.py` — 每日信号面巡检（纯标准库，基线经环境变量注入）
 - `scripts/rotate-machine-guid.ps1` — MachineGuid 备份+轮换（需提权，UAC 一次）
