@@ -40,6 +40,9 @@ description: 将一台大量泄露真实位置/身份信号的 Windows 电脑改
 3. 直连白名单最小化：每条规则标注归属与用途，定期按"日志零命中"清理。
 4. 验收：出口 IP 全应用一致（用 `scripts/daily-signal-scan.py` 的 exit_ip 探测）。
 
+### Phase 1.5：AI 客户端 killswitch（references/proxy-dns-architecture.md §7）
+在代理验收通过后，给每个 AI 客户端 exe 装防火墙出站规则：仅放行回环 + fake-ip 段，其余拒绝。先写回退脚本再安装，验证"代理在线正常用、代理全关只报连不上"。商店应用版本漂移由巡检哨兵检测。
+
 ### Phase 2：DNS 面（references/proxy-dns-architecture.md §2-§4）
 按五层设计落地：fake-ip + 关 AAAA + `dns-hijack: any:53` + nameserver 首查本地转发器 + 国内域名国内解析。部署 `scripts/dns-forwarder.py` 并设开机自启。验收：DNS 泄漏检测站中国条目清零（见 references/ops-verification.md）。
 
@@ -79,3 +82,4 @@ git 提交时区/邮箱元数据清理（历史仓库按留三条保真、其余
 - `scripts/dns-forwarder.py` — 本地 DNS 转发器（127.0.0.1:53 → DoH，上游故障回 SERVFAIL 触发核心回落）
 - `scripts/daily-signal-scan.py` — 每日信号面巡检（纯标准库，基线经环境变量注入）
 - `scripts/rotate-machine-guid.ps1` — MachineGuid 备份+轮换（需提权，UAC 一次）
+- `scripts/killswitch-install.ps1` / `scripts/killswitch-rollback.ps1` — AI 客户端防火墙 killswitch 安装/回退（先回退后安装，Phase 1.5）
