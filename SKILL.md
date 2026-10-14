@@ -1,6 +1,6 @@
 ---
 name: privacy-fortress
-description: 将一台大量泄露真实位置/身份信号的 Windows 电脑改造为最小信息暴露面。覆盖全部信号面：网络出口一致性、DNS 查询面、WebRTC/IPv6 泄漏、系统与硬件指纹（时区/语言/MachineGuid/设备名）、软件面与遥测、浏览器指纹、账号与 git 元数据、本地网络邻近、主动探测面。包含分阶段施工流程（每阶段先写回退脚本+超时防线）、Clash 系客户端分流规则与 DNS 转发器架构、每日自动巡检脚本与检测站清单。适用：用户要求"防止应用/web/AI 服务通过多信号综合分析推断我的真实地理位置或身份"、隐私加固、代理+TUN 环境搭建、DNS 防泄漏、每日隐私巡检。不适用于：已构成犯罪的规避执法需求、iOS/Android 设备（本 skill 针对 Windows）。
+description: 将一台大量泄露真实位置/身份信号的 Windows 电脑改造为最小信息暴露面。覆盖全部信号面：网络出口一致性、DNS 查询面、WebRTC/IPv6 泄漏、系统与硬件指纹（时区/语言/MachineGuid/设备名）、软件面与遥测、浏览器指纹、账号与 git 元数据、本地网络邻近、主动探测面。包含分阶段施工流程（每阶段先写回退脚本+超时防线）、Clash 系客户端分流规则与 DNS 转发器架构、误关代理防火墙 killswitch 兜底、每日自动巡检脚本与检测站清单、git 提交历史改写、邮箱第三方暴露审计。适用：用户要求"防止应用/web/AI 服务通过多信号综合分析推断我的真实地理位置或身份"、隐私加固、代理+TUN 环境搭建、DNS 防泄漏、每日隐私巡检。不适用于：已构成犯罪的规避执法需求、iOS/Android 设备（本 skill 针对 Windows）。
 ---
 
 # Privacy Fortress：最小信息暴露面改造
@@ -55,8 +55,8 @@ DNS 交给系统（DoH 关闭或用系统默认）；WebRTC IPHandling 设为禁
 ### Phase 5：软件面与遥测（references/browser-telemetry.md §2-§3）
 客户端遥测 env 开关全部关闭；遥测域名按温和清单 REJECT；helper 进程偷跑国内 DoH/偷 ping 的通道封死（DoH 端点整体压进隧道）；国产自保护软件按"允许采集、采集面缺失"原则处置，不卸载。
 
-### Phase 6：账号与元数据残留（references/signal-taxonomy.md §账号层）
-git 提交时区/邮箱元数据清理（历史仓库按留三条保真、其余删除的口径执行）；客户端设置文件清历史语言痕迹；历史中间文件与备份序列按白名单清理。
+### Phase 6：账号与元数据残留（references/account-metadata.md §1-§3）
+git 提交历史改写（epoch 保留时区重标法：三条规则——提交者邮箱全改 noreply、邮箱含旧标识才改作者邮箱、时区统一为代理出口时区），改写前 mirror 备份、force-push 后用搜索二次验证无残留；GitHub 账号 noreply 邮箱、commit 邮箱、用户名三层设置对齐东京画像；邮箱第三方暴露八源审计（泄露库/搜索引擎/Gravatar/code 搜索/授权回收/Gmail 自搜）；登录时机纪律（先核对账号邮箱/手机/支付国别与出口画像一致，再登录目标服务）。详见 references/account-metadata.md。客户端设置文件清历史语言痕迹；历史中间文件与备份序列按白名单清理。
 
 ### Phase 7：巡检自动化（references/ops-verification.md）
 部署 `scripts/daily-signal-scan.py` 为每日定时任务（cron 避开整点/半点，建议 7-23 或 37-53 分），基线 IP 用环境变量 `SIGNAL_BASELINE_IP` 注入。每日报告 PASS/WARN/FAIL；FAIL 项当天处理。检测站浏览器深度项列入人工复核清单，每周手动过一遍。
@@ -79,6 +79,7 @@ git 提交时区/邮箱元数据清理（历史仓库按留三条保真、其余
 - `references/browser-telemetry.md` — 浏览器指纹一致化、遥测阻断温和清单、helper 探测面防护
 - `references/ops-verification.md` — 18 项巡检清单、9 个检测站及通过标准、运维纪律
 - `references/threat-model-deep-matrix.md` — 以 AI 服务商政策文本为样本的全信号深矩阵（含 A/B/T/N 证据分级、CLI/Agent 环境面、一致性派生特征、处置优先级），Phase 0 审计与"是否还有遗漏"自检的最终对照表
+- `references/account-metadata.md` — git 历史改写 playbook（epoch 保留时区重标）、GitHub 账号设置、邮箱第三方暴露审计八源、登录时机纪律（Phase 6 执行细则）
 - `scripts/dns-forwarder.py` — 本地 DNS 转发器（127.0.0.1:53 → DoH，上游故障回 SERVFAIL 触发核心回落）
 - `scripts/daily-signal-scan.py` — 每日信号面巡检（纯标准库，基线经环境变量注入）
 - `scripts/rotate-machine-guid.ps1` — MachineGuid 备份+轮换（需提权，UAC 一次）
