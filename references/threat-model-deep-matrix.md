@@ -25,6 +25,7 @@
 | DNS resolver 身份/DNS leak | T | ✅fake-ip+dns-hijack+本地转发器；DoH 硬化进隧道；深度泄露测试每日必测 |
 | WebRTC 公网/私网地址 | T | ✅WebRtcIPHandling=disable_non_proxied_udp + 定位全局阻止 |
 | X-Forwarded-For | T | ✅TUN 出口不产生 XFF（无浏览器内嵌代理） |
+| **代理被误关后的裸连** | T | ✅**防火墙 killswitch**：AI 客户端仅放行回环+fake-ip 段，其余出站拒绝=代理全关时 fail-closed（架构见 proxy-dns-architecture.md §7；版本漂移由巡检哨兵检测） |
 
 ## 三、直接/间接位置（A/T/N）
 

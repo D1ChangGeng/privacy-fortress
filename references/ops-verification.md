@@ -23,6 +23,8 @@
 | 18 | 白名单快照（设 REQUIRED_DIRECT 时启用） | 必需直连条目在位 + 已清除条目回潮即 FAIL |
 | 19 | DNS 转发器健康 | 127.0.0.1:53 应答正常 = PASS；无应答/SERVFAIL = FAIL（核心已回落，查询面暴露） |
 | 20 | 检测站可达性 | 9 站 HTTP 200 |
+| 21 | Killswitch 规则在位（每 AI 客户端一条） | 规则存在且 enabled = PASS；缺失 = FAIL（断连保护失效） |
+| 22 | Killswitch 版本漂移 | 规则程序路径 = 当前 Appx 安装位置 = PASS；mismatch = FAIL（商店更新，重跑安装脚本刷新） |
 
 报告输出：Markdown 当日报告 + PASS/WARN/FAIL 结构化判定 + 人工复核清单（需浏览器 JS 的深度项）。
 
@@ -59,6 +61,7 @@
 10. 新装目标应用后审计其配置目录（如 Electron 应用的 `%APPDATA%\<App>\config.json`）：登录态（无 userId / windowSizeWasSignedIn=false 即未绑定账号）、分析设备 ID（ant-did 类）、遥测计划任务（如 Cowork VM 组件首次使用才落地，落地即复扫）。账号绑定前的窗口是调整画像的唯一时机。
 11. 共享运行时白名单必须用 PROCESS-PATH（完整路径）而非 PROCESS-NAME：node.exe/python.exe 是所有 Node/Python 程序的共用进程名，按名字放行=把同机所有 CLI 工具（包括 AI CLI）放出隧道。Kimi Work 的 runtime node 用精确路径白名单，全局 node 落兜底 MATCH 即为正确隔离（2026-09-30 核查确认）。
 12. 区域格式（Culture/LocaleName，决定货币符号/日期格式）是 IP↔locale↔currency 一致性轴的一部分，必须与出口国对齐（如 ja-JP）；显示语言可独立保持母语，两者互不影响。
+13. killswitch 防火墙规则先于"代理永远在线"的假设落地：先写回退脚本并实测可运行，再装规则；安装后必须端到端验证两种状态（代理在线=应用正常、代理全关=连接失败而非连通）。防火墙 `-Program` 不接受中段通配符，MSIX 应用填精确路径并把"商店更新致路径漂移"纳入巡检哨兵。
 
 ## §4 基线管理
 
