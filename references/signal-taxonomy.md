@@ -78,9 +78,11 @@ Phase 0 审计、Phase 3/5/6 施工的工作底稿。每行 = 一个可被对方
 
 | 信号 | 泄露途径 | 目标状态 | 验证 |
 |---|---|---|---|
-| git 提交时间戳时区 | commit `+0800` 等 | 历史仓库：保留本人核心仓库的保真提交，其余删除；新提交用掩护时区或 UTC | `git log --format=%ai` |
-| git 作者邮箱 | commit metadata | 公开仓库用专用中性邮箱 | `git log --format=%ae` |
-| 账号注册资料 | 服务商侧 | 与掩护身份一致（昵称/头像/生日），不含真实信息 | 账号自检 |
+| git 提交时间戳时区 | commit `+0800` 等 | 保留仓库全部改写：epoch 不变、偏移重标为掩护国（方法见 account-metadata.md §1）；不保留"保真提交"口径 | `git log --format=%ai` + 远端提交对象抽查 |
+| git 作者邮箱 | commit metadata | 全部保留仓库改写为 noreply；本地 gitconfig 全局身份同步断源 | `git log --format=%ae` + `git config --global user.email` |
+| GitHub 账号设置 | 资料页/README | 邮箱 visibility=private；README/描述无真实邮箱；location 等留空或掩护值 | `gh api user` + 网页自查 |
+| 邮箱第三方暴露 | 泄露库/搜索引擎/Gravatar/各代码托管 | 年度全套审计（account-metadata.md §3），命中即弃用该邮箱注册新服务 | XposedOrNot/精确串搜/Gravatar hash 探测 |
+| 账号注册资料 | 服务商侧 | 与掩护身份一致（昵称/头像/生日），不含真实信息；登录时机按 account-metadata.md §4 | 账号自检 |
 | 支付元数据 | 卡 BIN/账单地址 | 可用虚拟卡/礼品卡降低关联；属半诚实残留 | 台账记录 |
 | 客户端遥测开关 | AI 客户端 .settings.json 等 | 四项遥测开关全关（诊断/使用统计/反馈/个性化） | 配置文件核验 |
 

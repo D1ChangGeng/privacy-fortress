@@ -25,6 +25,7 @@
 | 20 | 检测站可达性 | 9 站 HTTP 200 |
 | 21 | Killswitch 规则在位（每 AI 客户端一条） | 规则存在且 enabled = PASS；缺失 = FAIL（断连保护失效） |
 | 22 | Killswitch 版本漂移 | 规则程序路径 = 当前 Appx 安装位置 = PASS；mismatch = FAIL（商店更新，重跑安装脚本刷新） |
+| 23 | 系统信号组六项（时区/MachineGuid/WebRTC策略/区域格式/git身份/遥测服务） | 全过 = PASS；任一 FAIL = 信号漂移（重装/升级/人为改动），按 ops 纪律 9 处置 |
 
 报告输出：Markdown 当日报告 + PASS/WARN/FAIL 结构化判定 + 人工复核清单（需浏览器 JS 的深度项）。
 
@@ -46,6 +47,7 @@
 | `cc.mastersgo.cc` | 过关清单 | 未过关项逐条处置 |
 
 **每周人工复核**（脚本替代不了）：DNS 深度测试、claude 过关项逐条、iplark 三指标、过关清单未过项。结果记台账。
+**月度**：GitHub commit 搜索旧邮箱变体 total=0；邮箱泄露库复核（XposedOrNot + HIBP 网页版，方法见 account-metadata.md §3）。结果记台账。
 
 ## §3 运维纪律
 
