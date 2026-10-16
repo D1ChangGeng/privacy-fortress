@@ -25,6 +25,7 @@
 | 20 | 检测站可达性 | 9 站 HTTP 200 |
 | 21 | Killswitch 规则在位（每 AI 客户端一条） | 规则存在且 enabled = PASS；缺失 = FAIL（断连保护失效） |
 | 22 | Killswitch 版本漂移 | 规则程序路径 = 当前 Appx 安装位置 = PASS；mismatch = FAIL（商店更新，重跑安装脚本刷新） |
+| 23 | 浏览器 killswitch（代理浏览器） | PF-Killswitch-Chrome 规则存在且 enabled、程序路径 = 当前 chrome.exe = PASS；缺失 = FAIL（浏览器裸连面失效）；另核对未覆盖浏览器清单无新增 |
 | 23 | 系统信号组六项（时区/MachineGuid/WebRTC策略/区域格式/git身份/遥测服务） | 全过 = PASS；任一 FAIL = 信号漂移（重装/升级/人为改动），按 ops 纪律 9 处置 |
 
 报告输出：Markdown 当日报告 + PASS/WARN/FAIL 结构化判定 + 人工复核清单（需浏览器 JS 的深度项）。

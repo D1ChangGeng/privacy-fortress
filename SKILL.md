@@ -43,6 +43,9 @@ description: 将一台大量泄露真实位置/身份信号的 Windows 电脑改
 ### Phase 1.5：AI 客户端 killswitch（references/proxy-dns-architecture.md §7）
 在代理验收通过后，给每个 AI 客户端 exe 装防火墙出站规则：仅放行回环 + fake-ip 段，其余拒绝。先写回退脚本再安装，验证"代理在线正常用、代理全关只报连不上"。商店应用版本漂移由巡检哨兵检测。
 
+### Phase 1.6：浏览器 killswitch（references/proxy-dns-architecture.md §7b）
+一台浏览器全覆盖为代理浏览器（放行集在 §7 基础上加内网三段，保校园网认证可达），另一台不做为国内直连专用——既堵"误关代理裸连"面，又免维护直连规则清单。Chrome 路径稳定无需哨兵；直连专用浏览器纪律上永不访问国外/AI 站点；新装浏览器须二选一分边。
+
 ### Phase 2：DNS 面（references/proxy-dns-architecture.md §2-§4）
 按五层设计落地：fake-ip + 关 AAAA + `dns-hijack: any:53` + nameserver 首查本地转发器 + 国内域名国内解析。部署 `scripts/dns-forwarder.py` 并设开机自启。验收：DNS 泄漏检测站中国条目清零（见 references/ops-verification.md）。
 
