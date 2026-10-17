@@ -133,9 +133,13 @@ AI 客户端 exe ─出站─→ 防火墙规则 ─┬─ 目的=127.0.0.1     
 
 实战：升级一次性造成 ① 用户自建节点（链式代理 socks5 + dialer-proxy）被删除，所有引用它的规则被全局改名指向底层组（链断，全部流量绕过住宅层）；② 此前所有文件直改的规则编辑被回滚。
 
+**新版客户端（本次升级后）的存储模型**：规则真源在 `database.sqlite` 的 `rules` + `profile_rule_mapping` 表（`scene=added/disabled` 软删除，`"order"` 为 fractional indexing 字符串，字典序即规则序）；链式代理在 `shared_preferences.json` 的 `flutter.config.appSettingProps.chainProxies`（多条住宅）+ `activeChainProxyName`（全局出口链开关，null=链断）；端口/系统代理/TUN/IPv6 在 `vpnProps`/`networkProps`。**对这类客户端：一切编辑走 DB/prefs，config.yaml 只读不写。**
+
 处置纪律：
 
-1. **改完文件立即重启客户端**让其把文件吃回内部存储，不要带着未消化的直改跑升级。
-2. **升级后必做恢复核验四键**：自建节点在位？规则目标名未被全局改名？文件直改的规则编辑仍在？DNS/TUN 五层（nameserver=127.0.0.1 / fake-ip / hijack / TUN / find-process-mode）未被重置？
-3. 升级前先留 `cp config.yaml config.yaml.bak-<tag>`；恢复 = 在**新**配置上重放编辑（保留升级的订阅变化），不要整体回退旧文件。
-4. 住宅/自建节点凭据另存一份在 workspace（`guard/` 目录），节点被删可一键重建。
+1. **改真源，不改生成物**：规则编辑插 DB（order 取目标位置的 fractional 空位，如链式块尾 `'Yzfae'` 之后取 `'Yzfaf'`），链式激活改 `activeChainProxyName`，开关改 `vpnProps`。改 config.yaml 只在"客户端停止运行 + 应急"时临时用，且重启后可能被重生成冲掉。
+2. **升级后必做恢复核验四键**：链式激活态（activeChainProxyName 非 null）？DB 规则与编辑一致（msedge 类进程规则在位、禁用规则 scene=disabled）？出口 IP 实测走住宅链（curl -x 实际端口 访问 ipinfo，应为住宅 IP 而非机场节点）？DNS/TUN/IPv6 开关（nameserver=127.0.0.1 / fake-ip / TUN on / find-process always / vpnProps.ipv6=false）？
+3. **端口跟随客户端**：升级可能改混合端口（实战 7890→17980）。系统代理客户端自管，但**自建工具的代理引用要跟着改**（git config http.proxy、脚本、环境变量）。防火墙 killswitch 只约束目的地址不约束回环端口，天然免疫端口变更。
+4. 升级前留备份三件套：`database.sqlite` / `shared_preferences.json` / `config.yaml` 各拷一份带时间戳；恢复 = 新状态上重放手术，不整体回退。
+5. 住宅/自建节点凭据另存一份在 workspace（`guard/` 目录），节点被删可一键重建。
+6. **IPv6 双关口径**：核心 IPv6（vpnProps.ipv6）与 DNS IPv6（patchClashConfig.dns.ipv6）都要 false——住宅链一般仅 IPv4，核心 IPv6 开着等于留一条未经验证的 v6 出口。
