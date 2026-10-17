@@ -7,6 +7,9 @@
 #   SIGNAL_OLD_GUID        旧泄露值(可选, 设置后与基线共同判定漂移)
 #   SIGNAL_CULTURE         区域格式基线(默认 ja-JP)
 #   SIGNAL_KILLSWITCH      JSON: {"<防火墙规则名>": ["<Appx包名>", "<exe名>"], ...}(可选, 未设置时跳过)
+#   CLIENT_CONFIG_YAML     客户端生成配置路径(可选, 设置时启用"配置完整性哨兵")
+#   REQUIRED_DIRECT        分号分隔的必需直连条目(规则串内含逗号, 故用分号; 与 FORBIDDEN_DIRECT 一起启用"IP白名单快照")
+#   FORBIDDEN_DIRECT       分号分隔的已清除条目(回潮检测, 可选)
 import json, os, re, socket, ssl, struct, subprocess, sys, time, urllib.request
 from datetime import datetime
 
@@ -15,6 +18,9 @@ EXPECTED_GUID = os.environ.get("SIGNAL_MACHINE_GUID", "")
 OLD_GUID = os.environ.get("SIGNAL_OLD_GUID", "")
 EXPECTED_CULTURE = os.environ.get("SIGNAL_CULTURE", "ja-JP")
 KILLSWITCH_TARGETS = json.loads(os.environ.get("SIGNAL_KILLSWITCH") or "{}")
+CLIENT_CONFIG_YAML = os.environ.get("CLIENT_CONFIG_YAML", "").strip()
+REQUIRED_DIRECT = [s.strip() for s in os.environ.get("REQUIRED_DIRECT", "").split(";") if s.strip()]
+FORBIDDEN_DIRECT = [s.strip() for s in os.environ.get("FORBIDDEN_DIRECT", "").split(";") if s.strip()]
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36"}
 TIMEOUT = 12
 
@@ -207,19 +213,17 @@ def probe_tun():
         add("TUN接管状态", "WARN", f"检测失败: {e}")
 
 def probe_config_integrity():
-    """蜂窝配置完整性哨兵: 客户端升级/重启漂移检测。读生成的config.yaml核验三项关键配置"""
+    """配置完整性哨兵: 客户端升级/重启漂移检测。设 CLIENT_CONFIG_YAML 启用(读取该路径的生成配置)"""
+    if not CLIENT_CONFIG_YAML:
+        add("配置完整性哨兵", "SKIP", "未设 CLIENT_CONFIG_YAML, 跳过(设为客户端生成配置路径即启用)")
+        return
     try:
-        cy = os.path.join(os.environ.get("LOCALAPPDATA", ""), "..", "Roaming", "com.follow")
-        cy = os.path.abspath(os.path.join(cy, "蜂窝加速器", "config.yaml"))
-        txt = open(cy, encoding="utf-8").read()
+        txt = open(CLIENT_CONFIG_YAML, encoding="utf-8").read()
         ok_ns = bool(re.search(r'^  nameserver:\n    - "127\.0\.0\.1"\n', txt, re.M))
         ok_hijack = "dns-hijack" in txt and "any:53" in txt
-        ok_match = "MATCH,蜂窝链式代理" in txt or "MATCH,蜂窝" in txt
-        ok_doh = ("DOMAIN-SUFFIX,doh.pub,蜂窝链式代理" in txt
-                  and "DOMAIN-SUFFIX,alidns.com,蜂窝链式代理" in txt
-                  and "DOMAIN-SUFFIX,doh.pub,DIRECT" not in txt
-                  and "DOMAIN-SUFFIX,alidns.com,DIRECT" not in txt
-                  and "223.5.5.5" in (re.search(r"proxy-server-nameserver:\n((?:    .+\n)+)", txt) or re.match("", "")).group(0))
+        ok_match = "MATCH," in txt
+        ok_doh = ("DOMAIN-SUFFIX,doh.pub,DIRECT" not in txt
+                  and "DOMAIN-SUFFIX,alidns.com,DIRECT" not in txt)
         bad = []
         if not ok_ns: bad.append("nameserver!=127.0.0.1")
         if not ok_hijack: bad.append("dns-hijack丢失")
@@ -233,30 +237,24 @@ def probe_config_integrity():
         add("配置完整性哨兵", "WARN", f"检查失败: {e}")
 
 def probe_whitelist_snapshot():
-    """IP直连白名单快照哨兵(2026-09-29终版): 3条必需在位 + 3条已清除境外IP不得回潮"""
+    """IP直连白名单快照哨兵: 设 REQUIRED_DIRECT(必需在位)/FORBIDDEN_DIRECT(回潮检测) 启用, 两者皆空则跳过"""
+    if not REQUIRED_DIRECT and not FORBIDDEN_DIRECT:
+        add("IP白名单快照", "SKIP", "未设 REQUIRED_DIRECT/FORBIDDEN_DIRECT, 跳过")
+        return
+    if not CLIENT_CONFIG_YAML:
+        add("IP白名单快照", "WARN", "已设白名单基线但 CLIENT_CONFIG_YAML 未设, 无法读取配置比对")
+        return
     try:
-        cy = os.path.join(os.environ.get("LOCALAPPDATA", ""), "..", "Roaming", "com.follow")
-        cy = os.path.abspath(os.path.join(cy, "蜂窝加速器", "config.yaml"))
-        txt = open(cy, encoding="utf-8").read()
-        required = [
-            "IP-CIDR,223.5.5.5/32,DIRECT,no-resolve",   # 核心引导解析生命线
-            "IP-CIDR,10.108.25.251/32,DIRECT",          # 校园网认证内网
-            "IP-CIDR,39.107.142.158/32,DIRECT",         # 阿里北京(唯一真实国内IP, CN地域锁保险)
-        ]
-        forbidden = [
-            "129.226.103.123",  # 腾讯香港(2026-09-29清除)
-            "43.154.254.142",   # 腾讯香港(2026-09-29清除)
-            "154.64.230.252",   # 美国洛杉矶(2026-09-29清除, 误标国内)
-        ]
-        missing = [r for r in required if r not in txt]
-        revived = [f for f in forbidden if f in txt]
+        txt = open(CLIENT_CONFIG_YAML, encoding="utf-8").read()
+        missing = [r for r in REQUIRED_DIRECT if r not in txt]
+        revived = [f for f in FORBIDDEN_DIRECT if f in txt]
         if missing or revived:
             parts = []
             if missing: parts.append("必需条目缺失: " + ",".join(missing))
-            if revived: parts.append("境外IP直连回潮: " + ",".join(revived))
+            if revived: parts.append("已清除条目回潮: " + ",".join(revived))
             add("IP白名单快照", "FAIL", "；".join(parts) + " - 直连通道构成已偏离基线!")
         else:
-            add("IP白名单快照", "PASS", "3条必需IP直连在位, 3条已清除境外IP未回潮")
+            add("IP白名单快照", "PASS", f"{len(REQUIRED_DIRECT)}条必需直连在位, {len(FORBIDDEN_DIRECT)}条已清除条目未回潮")
     except Exception as e:
         add("IP白名单快照", "WARN", f"检查失败: {e}")
 

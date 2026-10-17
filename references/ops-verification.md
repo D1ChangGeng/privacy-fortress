@@ -73,8 +73,8 @@
 | `SIGNAL_BASELINE_IP` | 住宅出口基线（必填） | 巡检该项报 WARN 并提示配置 |
 | `DOMESTIC_DNS_IP` | 国内引导 DNS | 默认 223.5.5.5 |
 | `CLIENT_CONFIG_YAML` | 客户端生成配置路径 | 配置哨兵跳过 |
-| `REQUIRED_DIRECT` | 逗号分隔的必需直连条目 | 快照哨兵跳过 |
-| `FORBIDDEN_DIRECT` | 逗号分隔的已清除条目（回潮检测） | 快照哨兵跳过 |
+| `REQUIRED_DIRECT` | 分号分隔的必需直连条目 | 快照哨兵跳过 |
+| `FORBIDDEN_DIRECT` | 分号分隔的已清除条目（回潮检测） | 快照哨兵跳过 |
 | `FORWARDER_PORT` | 转发器端口 | 默认 53 |
 
 基线变更（换节点/IP）流程：新基线实测达标（§2 全套）→ 更新环境变量 → 当日巡检确认 PASS。
