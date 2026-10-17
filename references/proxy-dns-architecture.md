@@ -138,6 +138,7 @@ AI 客户端 exe ─出站─→ 防火墙规则 ─┬─ 目的=127.0.0.1     
 处置纪律：
 
 1. **改真源，不改生成物**：规则编辑插 DB（order 取目标位置的 fractional 空位，如链式块尾 `'Yzfae'` 之后取 `'Yzfaf'`），链式激活改 `activeChainProxyName`，开关改 `vpnProps`。改 config.yaml 只在"客户端停止运行 + 应急"时临时用，且重启后可能被重生成冲掉。
+   **但注意（2026-10-17 二次实战补充）：新版客户端中，手工 INSERT 的新规则行即使字段与 UI 行完全一致（含 `account:<key>_<id>_added` 格式的 mapping id），也不被 UI 列表和运行配置消费**——客户端还有一层 UI 通道的状态缓存/校验，手插行被静默忽略。**新增规则必须走 UI 规则编辑器**；DB 直改只对"修改 UI 已建行的既有字段"可靠（scene 禁用、target 改名）。验证方式：UI 列表是否显示该行 + 无头浏览器双路径实测。
 2. **升级后必做恢复核验四键**：链式激活态（activeChainProxyName 非 null）？DB 规则与编辑一致（msedge 类进程规则在位、禁用规则 scene=disabled）？出口 IP 实测走住宅链（curl -x 实际端口 访问 ipinfo，应为住宅 IP 而非机场节点）？DNS/TUN/IPv6 开关（nameserver=127.0.0.1 / fake-ip / TUN on / find-process always / vpnProps.ipv6=false）？
 3. **端口跟随客户端**：升级可能改混合端口（实战 7890→17980）。系统代理客户端自管，但**自建工具的代理引用要跟着改**（git config http.proxy、脚本、环境变量）。防火墙 killswitch 只约束目的地址不约束回环端口，天然免疫端口变更。
 4. 升级前留备份三件套：`database.sqlite` / `shared_preferences.json` / `config.yaml` 各拷一份带时间戳；恢复 = 新状态上重放手术，不整体回退。
