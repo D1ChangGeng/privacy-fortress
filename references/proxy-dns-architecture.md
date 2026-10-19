@@ -1,37 +1,8 @@
 # 代理分流与 DNS 架构
 
-## 目录
-- [§1 分流规则设计](#1-分流规则设计)
-- [§2 DNS 五层设计](#2-dns-五层设计)
-- [§3 住宅 IP 选购标准](#3-住宅-ip-选购标准)
-- [§4 转发器部署](#4-转发器部署)
-- [§5 Clash 系客户端的既定约束](#5-clash-系客户端的既定约束)
-- [§6 事故恢复顺序](#6-事故恢复顺序)
+分流规则的完整设计（五相位、探测对抗、两种部署形态）见 `network-gateway.md`，本文只保留 DNS 架构、住宅 IP 选购、GUI 客户端文件注入约束。事故与决策见 `lessons.md`，事故恢复顺序见 `ops-runbook.md`，killswitch 见 `killswitch.md`。
 
-## §1 分流规则设计
-
-适用任何 Clash/Mihomo 兼容客户端。规则自上而下首命中即停，最终形态：
-
-```
-1. REJECT 纯遥测域名（ sentry.io / datadoghq.com / oaistatsig.com /
-   copilot 遥测 collector / exp-tas 等，清单见 browser-telemetry.md §2 ）
-2. 进程白名单 DIRECT（日常国内应用，逐进程标注用途）
-3. 链式目标域名组（国外 AI/开发/云服务域名 → 代理组）
-4. 国内域名白名单 DIRECT（日常真用服务，最小化）
-5. IP 白名单 DIRECT（引导解析 DNS IP + 内网/认证系统，每条标注归属）
-6. DoH 端点域名（国内外全部 → 代理组，封死应用偷跑 DoH 的直连通道）
-7. MATCH → 代理组（兜底，绝不允许直连兜底）
-```
-
-铁律：
-- **match 类规则全部位于兜底 MATCH 之前**；兜底必须是最后一个有效规则。
-- 国外 AI 应用访问国内站点（未被白名单命中的）自动落兜底走出口——这是"国际化"设计的核心收益，不要在客户端里给国内大站配直连。
-- 进程规则在 TUN 模式下进程识别仍然有效（实测），优先用进程规则保护"必须直连才能活"的应用（如本机 AI 客户端本体）。
-- 链式代理的目标组书写：一律写底层单跳组名，由客户端自动升级链式；直接写链式组名会被物化成嵌套封装组。
-- 客户端 UI 可见的规则与数据库/生成配置可能不一致：数据库存在而生成配置未渲染的行（同规则启用/停用双行、跨 profile 行）会造成"UI 里有、实际不生效"。审计时以**生成的 yaml 配置**为准，不以 UI 或数据库行数为准。
-- 订阅自带的大规则集若排在 MATCH 之后即为死代码（MATCH 之后一切不生效），无需清理但要知道它在不在生效面内。
-
-## §2 DNS 五层设计
+## §1 DNS 三层设计（2026-10-19 定版）
 
 ```
 dns:
@@ -39,22 +10,24 @@ dns:
   listen: "0.0.0.0:1053"        # 客户端内部端口，按客户端调整
   ipv6: false                   # 层1: 关 AAAA
   enhanced-mode: "fake-ip"      # 层2: fake-ip
-  nameserver: ["127.0.0.1"]     # 层3: 首查本地转发器(53)
-  proxy-server-nameserver: ["<国内DNS IP>"]   # 层4: 节点引导解析, IP字面量
-  fallback: ["tls://1.1.1.1", "tls://8.8.4.4"]  # 经 respect-rules 走代理
+  default-nameserver: ["<国内DNS IP>"]          # 引导解析(仅用于解析DoH域名/IP, IP字面量时无消耗)
+  nameserver: ["https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"]  # 层3: 境外域名DoH
   nameserver-policy:
-    geosite:cn: "<国内DNS IP>"   # 层5: 国内域名国内解析(可用性折衷)
+    "geosite:cn": ["<国内DNS IP>"]              # 层4: 国内域名国内解析(国内人设, 可用性折衷)
 tun:
   dns-hijack: ["any:53"]        # 所有 53 端口流量强灌进核心, 无旁路
 ```
 
 要点：
-- **转发器是架构核心**：核心首查 127.0.0.1:53 → `scripts/dns-forwarder.py` → DoH 1.1.1.1 → 流量经 TUN 落兜底 MATCH 走隧道出口。境外查询的每一跳都在境外。回环流量不入 TUN、不被 hijack 拦截，无循环。
-- **韧性**：转发器上游失败时回 SERVFAIL，核心自动回落国内 DNS——联网不断，查询面降级。巡检将其标 FAIL 提示降级状态。
-- **DoH 硬化**：`doh.pub`/`alidns.com` 等国内外 DoH 端点域名规则一律指向代理组。规则引擎分不清"核心的引导 DoH"和"应用偷跑的 DoH"，所以整个端点压进隧道：偷跑探测要么拿到出口地应答，要么超时回落系统 DNS（=干净管线）。核心自身的引导解析改用 IP 字面量，不依赖这些域名。
-- **引导防自锁**：`proxy-server-nameserver` 用 IP 字面量 + 一条 `IP-CIDR,<国内DNS IP>/32,DIRECT,no-resolve` 规则。即使隧道全死，核心仍能解析出节点域名完成恢复。no-resolve 防止 fake-ip 把 DNS 服务器自身也劫持造成死循环。
 
-## §3 住宅 IP 选购标准
+- **DoH-over-proxy 是架构核心**：非 CN 域名一律由核心经 DoH(443) 解析，DoH 连接本身走规则管线落隧道出口——境外域名的每一跳（核心→DoH→权威）都在境外。用 **IP 字面量** 端点，引导查询为零，不依赖任何域名解析。
+- **为什么必须如此**：明文 UDP 53 在不可信本地网上没有任何目的地可言——本地网关设备（高校/酒店/企业网常见的 Panabit 类）会整体劫持 53 端口代答，无论你的查询目标是哪个公共 DNS；上游变成当地运营商递归，境外浏览记录暴露且应答可被投毒（实战：`www.google.com` 被解析到 Facebook 的 IP）。检测方法：ipleak dnsdetection 官方 API 脚本化（每日巡检已固化此哨兵）。
+- **国内域名的暴露面是有意识的折衷**：geosite:cn 走国内 DNS 直连，本地网看到"解析了淘宝/百度"与国内人设一致。若国内 DNS 也被本地网投毒，可全量改国内 DoH（如 `https://223.5.5.5/dns-query`）。
+- **引导防自锁**：节点域名解析用 `proxy-server-nameserver`（国内 DNS IP 字面量）+ `IP-CIDR,<国内DNS IP>/32,DIRECT,no-resolve` 规则；即使隧道全死，核心仍能解析节点域名完成恢复。no-resolve 防止 fake-ip 把 DNS 服务器自身也劫持造成死循环。
+- **DoH 硬化**：`doh.pub`/`alidns.com` 等 DoH 端点域名规则一律指向代理组——应用硬编码偷跑 DoH 时，要么拿到出口地应答，要么超时回落系统 DNS（=干净管线）。核心自身用 IP 字面量，不依赖这些域名。
+- **fake-ip-filter 白名单**：校园网/企业认证页、QQ 快速登录、STUN、系统连通性探测等必须拿真 IP 的域放行进真解析（否则这些功能坏），其余全部 fake-ip。
+
+## §2 住宅 IP 选购标准
 
 | 指标 | 达标线 | 检测站 |
 |---|---|---|
@@ -64,83 +37,30 @@ tun:
 | 欺诈分 | 低分（Fraud Score 低） | scamalytics |
 | 人机占比 | 人类流量占比高 | ippure |
 | 目标服务可用性 | 能过 Cloudflare 校验、不被目标 AI 服务 403 | ip.net.coffee/cloudflare、实测登录 |
-| DNS 解析 | 该 IP 支持公共 DNS 正常解析（部分住宅 IP 的 DNS 被污染或不响应，买来先测） | nslookup 实测 |
+| DNS 环境 | 本地网不劫持 UDP53（选购前先测，见 §1） | ipleak dnsdetection |
 
-注意：IP 库城市级定位经常错（同一 IP 被标为相邻城市），省份/国家级才可靠。选购时以 ASN 与欺诈分为主要判据，城市标签仅参考。独享优于共享；共享 IP 要问清并发用户数与段内其他用户行为风险。
+注意：IP 库城市级定位经常错（同一 IP 被标为相邻城市），省份/国家级才可靠。选购以 ASN 与欺诈分为主要判据，城市标签仅参考。独享优于共享；共享 IP 问清并发用户数与段内其他用户行为风险。
 
 作者实测在用的服务（长期稳定，可作基准参照）：
 
-- 机场/链式代理：[蜂窝加速器](https://share.fengwo.live#/register?code=yxRGajMF)——支持链式代理与 TUN 全局接管，本 skill 的全部网络层设计在其上验证
+- 中转 VPS：自选机房（近本地入口、不限流量、协议抗干扰）
 - 住宅 IP：[IPDEEP](https://www.ipdeep.cn/?extendid=821fNWE0ODI3MzA2OTM4MzAxMTUzMzUx)——真家宽段，本 skill 巡检基线 IP 即出自该服务
+- 机场/链式代理（GUI 客户端形态基准）：[蜂窝加速器](https://share.fengwo.live#/register?code=yxRGajMF)——支持链式代理与 TUN 全局接管
 
-## §4 转发器部署
+## §3 GUI 客户端的既定约束（文件注入与存储模型）
 
-1. 复制 `scripts/dns-forwarder.py` 到常驻目录（如 `<workspace>/guard/`）。
-2. 客户端 nameserver 首查改为 `127.0.0.1`（见 §2），`dns-hijack: any:53`。
-3. 开机自启：Startup 文件夹放 vbs，`pythonw.exe` 无窗口启动：
-   ```vb
-   Set ws = CreateObject("WScript.Shell")
-   ws.Run """<pythonw路径>"" ""<dns-forwarder.py路径>""", 0, False
-   ```
-4. 验证：查询一个全新域名 → 抓包/连接日志可见转发器→DoH 443 连接；杀转发器后 curl 仍 200（回落韧性）；重启后 127.0.0.1:53 LISTENING。
+文件级注入配置的存活前提：只改客户端**已识别的白名单配置键**。客户端把配置保存在强类型内存模型中，每次启动从内存态整体覆写配置文件——未识别的键、非白名单取值一律丢弃。实验判定法：写入 → 重启客户端 → 读生成配置核验，三次重启存活才算数。`geosite:cn` 这类客户端预置键、DoH nameserver 取值已被多个客户端接受；其余键按此实验法逐个验证。
 
-## §5 Clash 系客户端的既定约束
+**存储真源模型**（FlClash 系实测）：界面状态在内部存储（`database.sqlite` 的 rules + profile_rule_mapping 表，`scene=added/disabled` 软删除，`order` 为 fractional indexing 字符串），链式代理在 prefs 的 `chainProxies` + `activeChainProxyName`，端口/系统代理/TUN/IPv6 在 vpnProps/networkProps；`config.yaml` 是生成物——版本升级/存储迁移时客户端从内部存储重建，文件直改全部蒸发（实战两次：链式节点被删+规则回滚）。**对这类客户端：一切编辑走 UI 编辑器，改真源不改生成物；DB 直改只对"修改 UI 已建行的既有字段"可靠——手工 INSERT 的新规则行即使字段完全一致也不被 UI 通道消费（静默忽略）。** 升级前备份三件套（内部数据库/prefs/生成配置，带时间戳）；恢复=新状态上重放手术，不整体回退。端口跟随客户端（升级可能改混合端口），自建工具的代理引用（git config/脚本/环境变量）同步改。
 
-文件级注入配置的存活前提：只改客户端**已识别的白名单配置键**。客户端把配置保存在强类型内存模型中，每次启动从内存态整体覆写配置文件——未识别的键、非白名单取值一律丢弃。实验判定法：写入 → 重启客户端 → 读生成配置核验，三次重启存活才算数。`geosite:cn` 这类客户端预置键、loopback 形式的 nameserver 值已被多个客户端接受；其余键按此实验法逐个验证。
+**IPv6 双关口径**：核心 IPv6 与 DNS IPv6 都要 false——住宅链一般仅 IPv4，核心 v6 开着等于留一条未经验证的出口。
 
-## §6 事故恢复顺序
+## §4 旧转发器方案存档
 
-改 DNS/分流配置后失联时，按序执行，每步后实测联网：
-1. 关链式代理（若启用）。
-2. 关 TUN，退回系统代理模式。
-3. 核验 nameserver 是否被客户端覆写漂移。
-4. 仍不通：重启客户端；再不通：用最近一份备份恢复配置库后重启。
-验收基线：用户本机正在使用的 AI 客户端能在 TUN 下正常对话 = 网络层验收通过的最高优先级项。
+~~`scripts/dns-forwarder.py`（127.0.0.1:53 → DoH，核心 nameserver 首查回环）已退役~~：多一跳本地组件、回环 53 单端口在部分客户端被拒、无消费者。现役设计为 §1 的 DoH-over-proxy。脚本存档供无法接受 DoH nameserver 的旧客户端形态参考。
 
-## §7 AI 客户端防火墙 killswitch（误关代理的 fail-closed 兜底）
+## §5 已迁出内容索引
 
-隧道方案的隐含假设是"代理永远在线"。人为失误（手滑关掉客户端/TUN/系统代理）会让 AI 客户端落入唯一危险形态：完全无接管层 → 真实 IP 直连目标服务。per-app 防火墙规则把这一形态从"靠纪律"变成"系统强制不可能"：
-
-```text
-AI 客户端 exe ─出站─→ 防火墙规则 ─┬─ 目的=127.0.0.1        → 放行（系统代理路径）
-                                ├─ 目的=198.18.0.0/15   → 放行（TUN fake-ip 路径）
-                                └─ 其余全部 IPv4 + 全部 IPv6 → 拒绝（代理全关时只报"连不上"）
-```
-
-要点：
-
-1. **放行段只有两段**：回环（防火墙对回环默认豁免，无需显式放行）与 fake-ip 段。TUN-only 模式（系统代理关）下应用直连 fake-ip，必须在放行集内，否则 killswitch 会误伤正常代理使用。
-2. **`-Program` 不支持中段通配符**（仅尾通配）；MSIX 商店应用（Claude/ChatGPT 桌面端均属此类）版本目录随自动更新变化，规则必须填精确路径，并接受"更新即漂移"的维护模型。
-3. **版本漂移由巡检哨兵兜住**（规则程序路径 vs `Get-AppxPackage` 安装位置逐日比对，mismatch 即 FAIL 并重跑安装脚本刷新）。实战案例：Claude 桌面端两周内自动更新一次，漂移真实发生。
-4. **回退脚本先行**：安装前先写 `killswitch-rollback.ps1`（删除规则即恢复），并实测一次回退可运行。
-5. 已知边界：LAN（192.168/10.x）对目标应用同样被禁（本机 MCP/Cowork 走 localhost 不受影响）；覆盖清单外的同类应用需各补一条规则。
-6. 执行：提权运行 `scripts/killswitch-install.ps1`（先按目标环境填 `$targets`），回读 `Get-NetFirewallApplicationFilter` 验证路径生效；端到端验收 = 代理在线时应用正常 + 代理全关时应用报连接失败而非连通。
-
-## §7b 浏览器 killswitch 变体（Chrome = 代理浏览器）
-
-桌面端 killswitch 之外，浏览器是"误关代理"场景下最大的裸连面：系统代理开关可能被其他软件清掉，浏览器无任何自身防线。处置（用户决策模型）：**一台浏览器全覆盖做代理浏览器，另一台不做为国内直连专用**——这样既堵住泄露面，又免维护国内直连规则清单。
-
-- 覆盖侧放行集在桌面端基础上**额外放行内网三段**（`10/8`、`172.16/12`、`192.168/16`）：校园网/企业认证页、路由器后台、局域网服务必须可达，否则认证流程本身被掐死。
-- Chrome 路径 `Application\chrome.exe` 稳定，无版本目录漂移，**无需哨兵**。
-- 封锁段枚举（除回环/fake-ip/内网外的全部 IPv4 + 全部 IPv6）：`0.0.0.0-9.255.255.255`、`11.0.0.0-172.15.255.255`、`172.32.0.0-192.167.255.255`、`192.169.0.0-198.17.255.255`、`198.20.0.0-255.255.255.255`、`::-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff`。
-- 回环豁免是 WFP 层行为（规则文本覆盖 127/8 也无妨，实测代理在线时浏览器经 127.0.0.1:7890 正常上网）。
-- 验证要点：地址段校验（白名单 IP 不在任何封锁段内、公网 IP 在）+ 代理在线时 headless 实测可出网。
-- 纪律边界：直连专用浏览器（不覆盖侧）**永不访问国外/AI 站点**；它本身就是一条有意识的直连通道。装了新浏览器默认先归入"未覆盖"清单，要么加入规则、要么明确划入直连专用。直连专用侧用进程规则（`PROCESS-NAME,msedge.exe,DIRECT`）实现，位置在全部 MATCH 组之后、其余 DIRECT 之前——误点国外站仍被 MATCH 截走代理，国内全直连；免维护为国内浏览器访问而存在的域名 DIRECT 清单。
-
-## §7c 客户端升级/存储迁移会回写直改（实战教训 2026-10-17）
-
-部分客户端（FlClash 系）把运行配置同时存两份：界面状态在内部存储（sqlite/prefs），`config.yaml` 由它生成。**直接改 `config.yaml` 绕过内部存储**——平时重启没问题（客户端启动时会读回文件），但**版本升级/存储迁移时客户端从内部存储重建配置，文件直改全部蒸发**。
-
-实战：升级一次性造成 ① 用户自建节点（链式代理 socks5 + dialer-proxy）被删除，所有引用它的规则被全局改名指向底层组（链断，全部流量绕过住宅层）；② 此前所有文件直改的规则编辑被回滚。
-
-**新版客户端（本次升级后）的存储模型**：规则真源在 `database.sqlite` 的 `rules` + `profile_rule_mapping` 表（`scene=added/disabled` 软删除，`"order"` 为 fractional indexing 字符串，字典序即规则序）；链式代理在 `shared_preferences.json` 的 `flutter.config.appSettingProps.chainProxies`（多条住宅）+ `activeChainProxyName`（全局出口链开关，null=链断）；端口/系统代理/TUN/IPv6 在 `vpnProps`/`networkProps`。**对这类客户端：一切编辑走 DB/prefs，config.yaml 只读不写。**
-
-处置纪律：
-
-1. **改真源，不改生成物**：规则编辑插 DB（order 取目标位置的 fractional 空位，如链式块尾 `'Yzfae'` 之后取 `'Yzfaf'`），链式激活改 `activeChainProxyName`，开关改 `vpnProps`。改 config.yaml 只在"客户端停止运行 + 应急"时临时用，且重启后可能被重生成冲掉。
-   **但注意（2026-10-17 二次实战补充）：新版客户端中，手工 INSERT 的新规则行即使字段与 UI 行完全一致（含 `account:<key>_<id>_added` 格式的 mapping id），也不被 UI 列表和运行配置消费**——客户端还有一层 UI 通道的状态缓存/校验，手插行被静默忽略。**新增规则必须走 UI 规则编辑器**；DB 直改只对"修改 UI 已建行的既有字段"可靠（scene 禁用、target 改名）。验证方式：UI 列表是否显示该行 + 无头浏览器双路径实测。
-2. **升级后必做恢复核验四键**：链式激活态（activeChainProxyName 非 null）？DB 规则与编辑一致（msedge 类进程规则在位、禁用规则 scene=disabled）？出口 IP 实测走住宅链（curl -x 实际端口 访问 ipinfo，应为住宅 IP 而非机场节点）？DNS/TUN/IPv6 开关（nameserver=127.0.0.1 / fake-ip / TUN on / find-process always / vpnProps.ipv6=false）？
-3. **端口跟随客户端**：升级可能改混合端口（实战 7890→17980）。系统代理客户端自管，但**自建工具的代理引用要跟着改**（git config http.proxy、脚本、环境变量）。防火墙 killswitch 只约束目的地址不约束回环端口，天然免疫端口变更。
-4. 升级前留备份三件套：`database.sqlite` / `shared_preferences.json` / `config.yaml` 各拷一份带时间戳；恢复 = 新状态上重放手术，不整体回退。
-5. 住宅/自建节点凭据另存一份在 workspace（`guard/` 目录），节点被删可一键重建。
-6. **IPv6 双关口径**：核心 IPv6（vpnProps.ipv6）与 DNS IPv6（patchClashConfig.dns.ipv6）都要 false——住宅链一般仅 IPv4，核心 IPv6 开着等于留一条未经验证的 v6 出口。
+- 分流规则五相位 / 探测对抗 / 自建与 GUI 部署形态 → `network-gateway.md`
+- killswitch 桌面端 + 浏览器变体 → `killswitch.md`
+- 巡检 / 台账 / 回退 / 事故恢复 / 升级四键 / 双开处置 → `ops-runbook.md`

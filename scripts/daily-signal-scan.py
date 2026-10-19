@@ -212,6 +212,65 @@ def probe_tun():
     except Exception as e:
         add("TUN接管状态", "WARN", f"检测失败: {e}")
 
+def probe_dns_leak_ipleak():
+    """ipleak dnsdetection API哨兵(v1.38): 唯一标签经系统DNS路径解析, 读回实际承担递归的解析器名单。
+    判定: 全部落在白名单干净段(CF/Google/Quad9)=PASS; 出现任何其他解析器(如中国联通27.40.x/2408:族/阿里223.5.x)=FAIL;
+    一个解析器都没采集到=WARN(检测不确定)。防回归目标: 校园Panabit劫持UDP53经联通递归代查境外域名。"""
+    import ipaddress, secrets
+    CLEAN = []
+    for cidr in [
+        "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
+        "141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
+        "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/12",
+        "172.64.0.0/13", "131.0.72.0/22",                     # Cloudflare
+        "8.8.4.0/24", "8.8.8.0/24", "74.125.0.0/16", "173.194.0.0/16",
+        "216.58.192.0/19", "216.239.32.0/19", "172.217.0.0/16", "172.253.0.0/16",
+        "209.85.128.0/17", "66.102.0.0/20", "66.249.64.0/19",   # Google
+        "9.9.9.0/24", "149.112.112.0/24",                       # Quad9
+        "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2a06:98c0::/29",
+        "2c0f:f248::/32",                                       # Cloudflare v6
+        "2001:4860::/32",                                       # Google v6
+        "2620:fe::/32",                                         # Quad9 v6
+    ]:
+        CLEAN.append(ipaddress.ip_network(cidr))
+    CN_HINT = ("27.40.", "27.148.", "211.138.", "219.158.", "112.64.", "223.5.", "223.6.",
+               "119.29.", "180.76.", "2407:", "2408:", "2409:", "240e:")
+    def is_clean(ip):
+        try:
+            a = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        return any(a in n for n in CLEAN)
+    try:
+        session = secrets.token_hex(20)
+        ok = 0
+        for i in range(3):
+            try:
+                http_get(f"https://{session}-k{i}.ipleak.net/dnsdetection/")
+                ok += 1
+            except Exception:
+                pass
+        if not ok:
+            add("ipleak DNS泄漏哨兵", "WARN", "3个探测标签全部请求失败, 检测不确定(网络或检测站不可达)")
+            return
+        _, body = http_get(f"https://{session}-k0.ipleak.net/dnsdetection/",
+                           {"Accept": "application/json"})
+        seen = list(json.loads(body).get("ip", {}).keys())
+        if not seen:
+            add("ipleak DNS泄漏哨兵", "WARN", f"仅{ok}标签成功但未采集到解析器, 检测不确定")
+            return
+        dirty = [ip for ip in seen if not is_clean(ip)]
+        if dirty:
+            cn = [ip for ip in dirty if ip.startswith(CN_HINT)]
+            tag = "国内解析器" if cn else "非白名单解析器"
+            add("ipleak DNS泄漏哨兵", "FAIL",
+                f"发现{len(dirty)}个{tag}: {', '.join(dirty[:6])} - DNS查询面已暴露!")
+        else:
+            add("ipleak DNS泄漏哨兵", "PASS",
+                f"{len(seen)}个解析器全部白名单干净段(CF/Google/Quad9)")
+    except Exception as e:
+        add("ipleak DNS泄漏哨兵", "WARN", f"检查失败: {e}")
+
 def probe_config_integrity():
     """配置完整性哨兵: 客户端升级/重启漂移检测。设 CLIENT_CONFIG_YAML 启用(读取该路径的生成配置)"""
     if not CLIENT_CONFIG_YAML:
@@ -258,33 +317,37 @@ def probe_whitelist_snapshot():
     except Exception as e:
         add("IP白名单快照", "WARN", f"检查失败: {e}")
 
-def probe_forwarder():
-    """本地DNS转发器健康检查: 127.0.0.1:53 应答真实解析=PASS; 无应答=SERVFAIL/拒接=FAIL(核心会回落223.5.5.5, 查询面重新暴露)"""
+def probe_dns_core():
+    """DNS核心健康: 向TUNDNS(198.18.0.2:53)发唯一探测域查询, 核心应答fake-ip=PASS;
+    无响应/拒接=FAIL(核心DNS半死, 表现为'部分网站打不开')。 唯一域名防缓存命中假阳性。"""
     import random, struct as _st
     tid = random.randint(0, 65535)
-    qname = b"\x07example\x03com\x00"
+    label = ("probe%d" % random.randint(100000, 999999)).encode()
+    qname = bytes([len(label)]) + label + b"\x07example\x03com\x00"
     q = _st.pack(">HHHHHH", tid, 0x0100, 1, 0, 0, 0) + qname + _st.pack(">HH", 1, 1)
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.settimeout(6)
     try:
-        s.sendto(q, ("127.0.0.1", 53))
+        s.sendto(q, ("198.18.0.2", 53))
         data, _ = s.recvfrom(512)
         if len(data) < 12:
-            add("DNS转发器健康", "FAIL", "响应过短")
+            add("DNS核心健康", "FAIL", "响应过短")
             return
         rcode = data[3] & 0x0F
         if rcode == 0:
-            add("DNS转发器健康", "PASS", "127.0.0.1:53 应答正常(境外查询经DoH东京出口)")
+            add("DNS核心健康", "PASS", "核心应答正常(fake-ip模式)")
         elif rcode == 2:
-            add("DNS转发器健康", "FAIL", "SERVFAIL(上游1.1.1.1不可达) - 核心已回落223.5.5.5, 查询面暴露!")
+            add("DNS核心健康", "FAIL", "SERVFAIL - 核心上游解析异常")
         else:
-            add("DNS转发器健康", "WARN", f"RCODE={rcode}")
+            add("DNS核心健康", "WARN", f"RCODE={rcode}")
     except socket.timeout:
-        add("DNS转发器健康", "FAIL", "无响应(转发器未运行?) - 核心已回落223.5.5.5, 查询面暴露!")
+        add("DNS核心健康", "FAIL", "TUN DNS无响应 - 核心DNS半死!")
     except ConnectionRefusedError:
-        add("DNS转发器健康", "FAIL", "连接被拒(转发器未运行) - 核心已回落223.5.5.5, 查询面暴露!")
+        add("DNS核心健康", "FAIL", "TUN DNS拒接 - 核心DNS半死!")
+    except OSError as e:
+        add("DNS核心健康", "FAIL", f"TUN DNS不可达({e.__class__.__name__}) - TUN可能已关闭")
     except Exception as e:
-        add("DNS转发器健康", "WARN", f"探测失败: {e}")
+        add("DNS核心健康", "WARN", f"探测失败: {e}")
     finally:
         s.close()
 
@@ -388,9 +451,10 @@ def main():
     probe_stun()
     probe_ipv6()
     probe_dns_consistency()
+    probe_dns_leak_ipleak()
     probe_config_integrity()
     probe_whitelist_snapshot()
-    probe_forwarder()
+    probe_dns_core()
     probe_system_signals()
     probe_killswitch()
     probe_sites()
